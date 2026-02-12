@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.hurricanesoft:/root/.hurricanesoft:ro
+      - ./static:/app/static:ro
+    environment:
+      - HS_DB_TYPE=postgresql
+      - HS_PG_HOST=host.docker.internal
+      - HS_PG_PORT=5432
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
