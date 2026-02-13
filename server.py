@@ -237,7 +237,8 @@ def main():
     parser = argparse.ArgumentParser(description='HurricaneSoft Unified API Server')
     parser.add_argument('--host', default='0.0.0.0', help='Bind host (default: 0.0.0.0)')
     parser.add_argument('--port', type=int, default=8080, help='Bind port (default: 8080)')
-    parser.add_argument('--static', default=None, help='Static files directory for web dashboard')
+    default_static = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    parser.add_argument('--static', default=default_static, help='Static files directory for web dashboard')
     args = parser.parse_args()
     run(host=args.host, port=args.port, static_dir=args.static)
 

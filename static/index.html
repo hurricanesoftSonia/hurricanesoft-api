@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>颶風軟體 Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Login Overlay -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="login-logo">🌀</div>
+    <h1>颶風軟體</h1>
+    <p>統一管理平台</p>
+    <input id="loginUser" placeholder="帳號" autocomplete="username">
+    <input id="loginPass" type="password" placeholder="密碼" autocomplete="current-password">
+    <button onclick="doLogin()">登入</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div class="app" id="app" style="display:none">
+  <!-- Top bar -->
+  <header class="topbar">
+    <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+    <div class="topbar-title">🌀 颶風軟體</div>
+    <div class="topbar-right">
+      <span class="badge" id="badgeMsg" title="未讀訊息" style="display:none">💬 <span id="badgeMsgN">0</span></span>
+      <span class="badge" id="badgeMail" title="未讀信件" style="display:none">📧 <span id="badgeMailN">0</span></span>
+      <span class="user-name" id="userName"></span>
+      <button class="btn-logout" onclick="doLogout()">登出</button>
+    </div>
+  </header>
+
+  <div class="main-wrap">
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <a class="nav-item" data-page="todo" onclick="go('todo')">📋 待辦事項</a>
+      <a class="nav-item" data-page="memo" onclick="go('memo')">📝 備忘錄</a>
+      <a class="nav-item" data-page="account" onclick="go('account')">💰 記帳</a>
+      <a class="nav-item" data-page="announce" onclick="go('announce')">📢 公告</a>
+      <a class="nav-item" data-page="msg" onclick="go('msg')">💬 訊息</a>
+      <a class="nav-item" data-page="health" onclick="go('health')">🏥 系統狀態</a>
+      <a class="nav-item" data-page="mail" onclick="go('mail')">📧 郵件</a>
+    </nav>
+
+    <!-- Content -->
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
