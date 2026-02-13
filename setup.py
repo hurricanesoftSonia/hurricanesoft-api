@@ -1,9 +1,10 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
     name='hurricanesoft-api',
     version='0.1.0',
-    packages=find_packages(),
+    packages=['hurricanesoft_api'],
+    package_dir={'hurricanesoft_api': '.'},
     python_requires='>=3.8',
     install_requires=[
         'hurricanesoft-cli',
@@ -14,7 +15,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'hs-api=hurricanesoft_api.server:main',
+            'hurricanesoft-api=hurricanesoft_api.server:main',
         ],
     },
     author='Sonia',
