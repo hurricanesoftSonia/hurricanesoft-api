@@ -27,7 +27,7 @@
       document.getElementById('loginOverlay').style.display = 'none';
       document.getElementById('app').style.display = 'flex';
       document.getElementById('userName').textContent = user;
-      go('todo');
+      go('dashboard');
       startPolling();
     }).catch(() => {
       document.getElementById('loginError').textContent = '登入失敗，請確認帳號密碼';
@@ -85,6 +85,90 @@
 
   // ========== PAGE RENDERERS ==========
   const pages = {};
+
+  // ----- DASHBOARD -----
+  pages.dashboard = function (c) {
+    api('GET', '/api/dashboard').then(d => {
+      const todo = d.todo || {};
+      const memo = d.memo || {};
+      const msg = d.msg || {};
+      const mail = d.mail || {};
+      const announce = d.announce || {};
+      const health = d.health || {};
+      const system = d.system || {};
+      
+      let h = `<div class="dashboard-grid">
+        <div class="dash-card" onclick="go('todo')">
+          <div class="dash-icon">📋</div>
+          <div class="dash-title">待辦事項</div>
+          <div class="dash-stats">
+            <span class="stat-pending">${todo.pending || 0} 未完成</span>
+            <span class="stat-ok">${todo.completed || 0} 已完成</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('memo')">
+          <div class="dash-icon">📝</div>
+          <div class="dash-title">備忘錄</div>
+          <div class="dash-stats">
+            <span class="stat-number">${memo.total || 0} 筆</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('msg')">
+          <div class="dash-icon">💬</div>
+          <div class="dash-title">訊息</div>
+          <div class="dash-stats">
+            <span class="stat-alert">${msg.unread || 0} 未讀</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('mail')">
+          <div class="dash-icon">📧</div>
+          <div class="dash-title">郵件</div>
+          <div class="dash-stats">
+            <span class="stat-alert">${mail.unread || 0} 未讀</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('announce')">
+          <div class="dash-icon">📢</div>
+          <div class="dash-title">公告</div>
+          <div class="dash-stats">
+            <span class="stat-pending">${announce.pending || 0} 待確認</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('health')">
+          <div class="dash-icon">🏥</div>
+          <div class="dash-title">系統健康</div>
+          <div class="dash-stats">
+            <span class="stat-${health.status === 'ok' || health.status === 'healthy' ? 'ok' : 'fail'}">${esc(health.status || 'unknown')}</span>
+          </div>
+        </div>
+        
+        <div class="dash-card" onclick="go('account')">
+          <div class="dash-icon">💰</div>
+          <div class="dash-title">記帳</div>
+          <div class="dash-stats">
+            <span class="stat-number">管理帳務</span>
+          </div>
+        </div>
+        
+        <div class="dash-card">
+          <div class="dash-icon">⚙️</div>
+          <div class="dash-title">系統資訊</div>
+          <div class="dash-stats">
+            <span class="stat-number">v${esc(system.version || '1.0')}</span>
+            <span class="stat-number">${esc(system.uptime || '0h 0m')}</span>
+          </div>
+        </div>
+      </div>`;
+      c.innerHTML = h;
+    }).catch(e => {
+      c.innerHTML = `<div class="empty">無法載入儀表板: ${esc(e.message)}</div>`;
+    });
+  };
 
   // ----- TODO -----
   pages.todo = function (c) {

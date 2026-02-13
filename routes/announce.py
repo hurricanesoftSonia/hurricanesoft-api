@@ -1,7 +1,7 @@
 """AnnounceTool REST API routes.
 
 Endpoints:
-    GET    /api/announce/list             — list announcements (?priority=&archived=&limit=)
+    GET    /api/announce/list             — list announcements (?priority=&archived=&page=&per_page=)
     GET    /api/announce/<id>             — get announcement
     POST   /api/announce/add              — post announcement {title, body?, priority?}
     POST   /api/announce/<id>/archive     — archive
@@ -14,18 +14,24 @@ Endpoints:
     POST   /api/announce/contacts         — add contact {name, email}
     DELETE /api/announce/contacts/<name>  — remove contact
 """
+import math
+import traceback
 from hurricanesoft_cli.db_factory import get_connection
 
 
 def _get_conn():
-    from announcetool import db as sqlite_db
     try:
-        from announcetool import db_pg
-        pg_init = db_pg.get_conn
-    except (ImportError, RuntimeError):
-        pg_init = None
-    conn, _ = get_connection('announcetool', sqlite_init_fn=sqlite_db.get_conn, pg_init_fn=pg_init)
-    return conn
+        from announcetool import db as sqlite_db
+        try:
+            from announcetool import db_pg
+            pg_init = db_pg.get_conn
+        except (ImportError, RuntimeError):
+            pg_init = None
+        # Use init_db to ensure tables exist
+        conn, _ = get_connection('announcetool', sqlite_init_fn=sqlite_db.init_db, pg_init_fn=pg_init)
+        return conn
+    except Exception as e:
+        raise ConnectionError(f"Database connection failed: {e}")
 
 
 def _row(r):
@@ -34,88 +40,147 @@ def _row(r):
     return dict(r) if hasattr(r, 'keys') else r
 
 
+def _paginate(items, page=1, per_page=20):
+    """Apply pagination to a list and return paginated response."""
+    total = len(items)
+    pages = math.ceil(total / per_page) if per_page > 0 else 1
+    start = (page - 1) * per_page
+    end = start + per_page
+    
+    return {
+        'items': items[start:end],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pages
+    }
+
+
 def handle(method, path, body, user):
-    from announcetool import db
-    conn = _get_conn()
-    username = user.get('username', '')
-    parts = path.strip('/').split('/')
-    sub = parts[2] if len(parts) > 2 else 'list'
-
-    if method == 'GET' and sub == 'list':
-        p = body or {}
-        rows = db.list_announcements(conn,
-                                     priority=p.get('priority'),
-                                     archived=p.get('archived') == '1',
-                                     limit=int(p.get('limit', 50)))
-        return 200, [_row(r) for r in rows]
-
-    if method == 'POST' and sub == 'add':
-        if not body or 'title' not in body:
-            return 400, {'error': 'title is required'}
-        ann_id = db.post_announcement(conn, body['title'],
-                                      body=body.get('body', ''),
-                                      priority=body.get('priority', 'normal'),
-                                      posted_by=username)
-        return 201, {'id': ann_id, 'message': 'created'}
-
-    if method == 'GET' and sub == 'contacts':
-        rows = db.list_contacts(conn)
-        return 200, [_row(r) for r in rows]
-
-    if method == 'POST' and sub == 'contacts':
-        if not body or 'name' not in body or 'email' not in body:
-            return 400, {'error': 'name and email required'}
-        result = db.add_contact(conn, body['name'], body['email'])
-        return 201, {'success': bool(result), 'message': 'created'}
-
-    # DELETE /api/announce/contacts/<name>
-    if method == 'DELETE' and sub == 'contacts' and len(parts) > 3:
-        name = parts[3]
-        db.remove_contact(conn, name)
-        return 200, {'message': 'deleted'}
-
-    # Numeric ID routes
     try:
-        item_id = int(sub)
-    except (ValueError, TypeError):
-        return 404, {'error': 'not found'}
+        from announcetool import db
+        conn = _get_conn()
+        username = user.get('username', '')
+        parts = path.strip('/').split('/')
+        sub = parts[2] if len(parts) > 2 else 'list'
 
-    action = parts[3] if len(parts) > 3 else None
+        if method == 'GET' and sub == 'list':
+            p = body or {}
+            
+            # Pagination
+            try:
+                page = int(p.get('page', 1))
+                per_page = int(p.get('per_page', 20))
+                if page < 1:
+                    page = 1
+                if per_page < 1 or per_page > 100:
+                    per_page = 20
+            except (ValueError, TypeError):
+                return 400, {'error': 'Invalid pagination parameters'}
+            
+            rows = db.list_announcements(conn,
+                                         priority=p.get('priority'),
+                                         archived=p.get('archived') == '1',
+                                         limit=None)
+            items = [_row(r) for r in rows]
+            return 200, _paginate(items, page, per_page)
 
-    if method == 'GET' and action is None:
-        row = db.get_announcement(conn, item_id)
-        if not row:
+        if method == 'POST' and sub == 'add':
+            # Input validation
+            if not body:
+                return 400, {'error': 'Request body is required'}
+            if 'title' not in body or not body['title']:
+                return 400, {'error': 'title is required'}
+            if 'content' not in body or not body['content']:
+                return 400, {'error': 'content is required'}
+            
+            ann_id = db.post_announcement(conn, body['title'],
+                                          body=body.get('content', ''),
+                                          priority=body.get('priority', 'normal'),
+                                          posted_by=username)
+            return 201, {'id': ann_id, 'message': 'created'}
+
+        if method == 'GET' and sub == 'contacts':
+            rows = db.list_contacts(conn)
+            return 200, [_row(r) for r in rows]
+
+        if method == 'POST' and sub == 'contacts':
+            if not body:
+                return 400, {'error': 'Request body is required'}
+            if 'name' not in body or not body['name']:
+                return 400, {'error': 'name is required'}
+            if 'email' not in body or not body['email']:
+                return 400, {'error': 'email is required'}
+            
+            result = db.add_contact(conn, body['name'], body['email'])
+            return 201, {'success': bool(result), 'message': 'created'}
+
+        # DELETE /api/announce/contacts/<name>
+        if method == 'DELETE' and sub == 'contacts' and len(parts) > 3:
+            name = parts[3]
+            db.remove_contact(conn, name)
+            return 200, {'message': 'deleted'}
+
+        # Numeric ID routes
+        try:
+            item_id = int(sub)
+        except (ValueError, TypeError):
             return 404, {'error': 'not found'}
-        return 200, _row(row)
 
-    if method == 'POST' and action == 'archive':
-        db.archive_announcement(conn, item_id)
-        return 200, {'message': 'archived'}
+        action = parts[3] if len(parts) > 3 else None
 
-    if method == 'POST' and action == 'unarchive':
-        db.unarchive_announcement(conn, item_id)
-        return 200, {'message': 'unarchived'}
+        if method == 'GET' and action is None:
+            row = db.get_announcement(conn, item_id)
+            if not row:
+                return 404, {'error': 'Announcement not found'}
+            return 200, _row(row)
 
-    if method == 'GET' and action == 'recipients':
-        rows = db.get_recipients(conn, item_id)
-        return 200, [_row(r) for r in rows]
+        if method == 'POST' and action == 'archive':
+            db.archive_announcement(conn, item_id)
+            return 200, {'message': 'archived'}
 
-    if method == 'POST' and action == 'recipients':
-        if not body or 'contacts' not in body:
-            return 400, {'error': 'contacts list required'}
-        db.add_recipients(conn, item_id, body['contacts'])
-        return 200, {'message': 'recipients added'}
+        if method == 'POST' and action == 'unarchive':
+            db.unarchive_announcement(conn, item_id)
+            return 200, {'message': 'unarchived'}
 
-    if method == 'POST' and action == 'ack':
-        if not body or 'email' not in body:
-            return 400, {'error': 'email required'}
-        db.mark_read(conn, item_id, body['email'])
-        return 200, {'message': 'acknowledged'}
+        if method == 'GET' and action == 'recipients':
+            rows = db.get_recipients(conn, item_id)
+            return 200, [_row(r) for r in rows]
 
-    if method == 'POST' and action == 'remind':
-        if not body or 'email' not in body:
-            return 400, {'error': 'email required'}
-        db.increment_remind(conn, item_id, body['email'])
-        return 200, {'message': 'reminded'}
+        if method == 'POST' and action == 'recipients':
+            if not body:
+                return 400, {'error': 'Request body is required'}
+            if 'contacts' not in body or not isinstance(body['contacts'], list):
+                return 400, {'error': 'contacts list is required'}
+            
+            db.add_recipients(conn, item_id, body['contacts'])
+            return 200, {'message': 'recipients added'}
 
-    return 404, {'error': 'not found'}
+        if method == 'POST' and action == 'ack':
+            if not body:
+                return 400, {'error': 'Request body is required'}
+            if 'email' not in body or not body['email']:
+                return 400, {'error': 'email is required'}
+            
+            db.mark_read(conn, item_id, body['email'])
+            return 200, {'message': 'acknowledged'}
+
+        if method == 'POST' and action == 'remind':
+            if not body:
+                return 400, {'error': 'Request body is required'}
+            if 'email' not in body or not body['email']:
+                return 400, {'error': 'email is required'}
+            
+            db.increment_remind(conn, item_id, body['email'])
+            return 200, {'message': 'reminded'}
+
+        return 404, {'error': 'not found'}
+    
+    except ConnectionError as e:
+        return 503, {'error': str(e)}
+    except ValueError as e:
+        return 400, {'error': f'Invalid input: {str(e)}'}
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"Error in announce route: {e}\n{tb}")
+        return 500, {'error': f'Internal server error: {str(e)}'}

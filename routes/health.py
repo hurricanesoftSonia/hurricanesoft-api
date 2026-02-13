@@ -12,7 +12,8 @@ import socket
 
 def _get_conn():
     from healthtool import db as sqlite_db
-    conn, _ = get_connection('healthtool', sqlite_init_fn=sqlite_db.get_conn)
+    # Initialize DB if needed (creates tables on first access)
+    conn, _ = get_connection('healthtool', sqlite_init_fn=sqlite_db.init_db)
     return conn
 
 

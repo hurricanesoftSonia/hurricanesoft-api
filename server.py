@@ -12,20 +12,24 @@ import json
 import os
 import sys
 import datetime
+import time
+import traceback
 from urllib.parse import urlparse, parse_qs
 
 from hurricanesoft_api import __version__
 from hurricanesoft_api.middleware import authenticate, cors_headers, handle_cors_preflight
+from hurricanesoft_api.logger import log_request, log_error, log_info
 
 # Route registry: prefix → module
 ROUTE_MAP = {
-    '/api/todo':     'hurricanesoft_api.routes.todo',
-    '/api/memo':     'hurricanesoft_api.routes.memo',
-    '/api/account':  'hurricanesoft_api.routes.account',
-    '/api/announce': 'hurricanesoft_api.routes.announce',
-    '/api/msg':      'hurricanesoft_api.routes.msg',
-    '/api/health':   'hurricanesoft_api.routes.health',
-    '/api/mail':     'hurricanesoft_api.routes.mail',
+    '/api/todo':      'hurricanesoft_api.routes.todo',
+    '/api/memo':      'hurricanesoft_api.routes.memo',
+    '/api/account':   'hurricanesoft_api.routes.account',
+    '/api/announce':  'hurricanesoft_api.routes.announce',
+    '/api/msg':       'hurricanesoft_api.routes.msg',
+    '/api/health':    'hurricanesoft_api.routes.health',
+    '/api/mail':      'hurricanesoft_api.routes.mail',
+    '/api/dashboard': 'hurricanesoft_api.routes.dashboard',
 }
 
 # Cached route modules
@@ -90,69 +94,86 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         return params
 
     def _route(self, method):
+        start_time = time.time()
         parsed = urlparse(self.path)
         path = parsed.path.rstrip('/')
+        username = None
+        status_code = 200
 
-        # CORS preflight
-        if method == 'OPTIONS':
-            status, headers, body = handle_cors_preflight()
-            self.send_response(status)
-            for k, v in headers.items():
-                self.send_header(k, v)
-            self.end_headers()
-            if body:
-                self.wfile.write(body)
-            return
-
-        # API version / health
-        if path == '/api' or path == '/api/version':
-            self._send_json(200, {
-                'name': 'hurricanesoft-api',
-                'version': __version__,
-                'endpoints': list(ROUTE_MAP.keys()),
-            })
-            return
-
-        # Find matching route
-        matched_prefix = None
-        for prefix in ROUTE_MAP:
-            if path == prefix or path.startswith(prefix + '/'):
-                matched_prefix = prefix
-                break
-
-        if matched_prefix:
-            # Authenticate
-            user, err = authenticate(self.headers)
-            if err:
-                self._send_json(401, {'error': err})
+        try:
+            # CORS preflight
+            if method == 'OPTIONS':
+                status, headers, body = handle_cors_preflight()
+                self.send_response(status)
+                for k, v in headers.items():
+                    self.send_header(k, v)
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+                status_code = status
                 return
 
-            # Parse body/params
-            if method in ('POST', 'PUT', 'PATCH', 'DELETE'):
-                body = self._read_body()
-                if body is None:
-                    body = {}
-            else:
-                body = self._get_query_params()
+            # API version / health
+            if path == '/api' or path == '/api/version':
+                self._send_json(200, {
+                    'name': 'hurricanesoft-api',
+                    'version': __version__,
+                    'endpoints': list(ROUTE_MAP.keys()),
+                })
+                status_code = 200
+                return
 
-            # Dispatch to route handler
-            try:
-                mod = _get_route_module(matched_prefix)
-                status, data = mod.handle(method, path, body, user)
-                self._send_json(status, data)
-            except Exception as e:
-                sys.stderr.write(f"Error in {matched_prefix}: {e}\n")
-                import traceback
-                traceback.print_exc()
-                self._send_json(500, {'error': str(e)})
-            return
+            # Find matching route
+            matched_prefix = None
+            for prefix in ROUTE_MAP:
+                if path == prefix or path.startswith(prefix + '/'):
+                    matched_prefix = prefix
+                    break
 
-        # Static file serving for web dashboard
-        if STATIC_DIR:
-            self._serve_static(path)
-            return
+            if matched_prefix:
+                # Authenticate
+                user, err = authenticate(self.headers)
+                if err:
+                    self._send_json(401, {'error': err})
+                    status_code = 401
+                    return
+                
+                username = user.get('username', 'anonymous')
 
-        self._send_json(404, {'error': 'not found'})
+                # Parse body/params
+                if method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                    body = self._read_body()
+                    if body is None:
+                        body = {}
+                else:
+                    body = self._get_query_params()
+
+                # Dispatch to route handler
+                try:
+                    mod = _get_route_module(matched_prefix)
+                    status, data = mod.handle(method, path, body, user)
+                    self._send_json(status, data)
+                    status_code = status
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    log_error(path, str(e), tb)
+                    self._send_json(500, {'error': str(e)})
+                    status_code = 500
+                return
+
+            # Static file serving for web dashboard
+            if STATIC_DIR:
+                self._serve_static(path)
+                status_code = 200  # or whatever _serve_static sets
+                return
+
+            self._send_json(404, {'error': 'not found'})
+            status_code = 404
+        
+        finally:
+            # Log request
+            duration_ms = (time.time() - start_time) * 1000
+            log_request(method, path, username or 'anonymous', status_code, duration_ms)
 
     def _serve_static(self, path):
         """Serve static files from STATIC_DIR."""
@@ -225,10 +246,14 @@ def run(host='0.0.0.0', port=8080, static_dir=None):
     print(f"🌀 HurricaneSoft API Server v{__version__}")
     print(f"🚀 Listening on {host}:{port}")
     print(f"📡 Endpoints: {', '.join(ROUTE_MAP.keys())}")
+    
+    log_info(f"Server started v{__version__} on {host}:{port}")
+    
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n🛑 Server stopped.")
+        log_info("Server stopped")
         server.server_close()
 
 
